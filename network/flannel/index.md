@@ -23,9 +23,9 @@
 
 除了UDP，Flannel还支持很多其他的Backend：
 
-- udp：使用udp封装，默认使用8285端口
+- udp：使用用户态udp封装，默认使用8285端口。由于是在用户态封装和解包，性能上有较大的损失
 - vxlan：vxlan封装，需要配置VNI，Port（默认8472）和[GBP](https://github.com/torvalds/linux/commit/3511494ce2f3d3b77544c79b87511a4ddb61dc89)
-- host-gw：直接路由的方式
+- host-gw：直接路由的方式，将容器网络的路由信息直接更新到主机的路由表中，仅适用于二层直接可达的网络
 - aws-vpc：使用 Amazon VPC route table 创建路由，适用于AWS上运行的容器
 - gce：使用Google Compute Engine Network创建路由，所有instance需要开启IP forwarding，适用于GCE上运行的容器
 - ali-vpc：使用阿里云VPC route table 创建路由，适用于阿里云上运行的容器
@@ -70,10 +70,47 @@ CNI flannel插件会将flannel网络配置转换为bridge插件配置，并调�
 
 ## Kubernetes集成
 
+使用flannel前需要配置` kube-controller-manager --allocate-node-cidrs=true --cluster-cidr=10.244.0.0/16`。
+
 ```sh
-kubectl create -f https://github.com/coreos/flannel/raw/master/Documentation/kube-flannel-rbac.yml
-kubectl create -f https://github.com/coreos/flannel/raw/master/Documentation/kube-flannel.yml
+kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
 ```
+
+这会启动flanneld容器，并配置CNI网络插件：
+
+```sh
+$ ps -ef | grep flannel | grep -v grep
+root      3625  3610  0 13:57 ?        00:00:00 /opt/bin/flanneld --ip-masq --kube-subnet-mgr
+root      9640  9619  0 13:51 ?        00:00:00 /bin/sh -c set -e -x; cp -f /etc/kube-flannel/cni-conf.json /etc/cni/net.d/10-flannel.conf; while true; do sleep 3600; done
+
+$ cat /etc/cni/net.d/10-flannel.conf
+{
+  "name": "cbr0",
+  "type": "flannel",
+  "delegate": {
+    "isDefaultGateway": true
+  }
+}
+```
+
+![](flannel-components.png)
+
+flanneld自动连接kubernetes API，根据`node.Spec.PodCIDR`配置本地的flannel网络子网，并为容器创建vxlan和相关的子网路由。
+
+```sh
+$ cat /run/flannel/subnet.env
+FLANNEL_NETWORK=10.244.0.0/16
+FLANNEL_SUBNET=10.244.0.1/24
+FLANNEL_MTU=1410
+FLANNEL_IPMASQ=true
+
+$ ip -d link show flannel.1
+12: flannel.1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1410 qdisc noqueue state UNKNOWN mode DEFAULT group default
+    link/ether 8e:5a:0d:07:0f:0d brd ff:ff:ff:ff:ff:ff promiscuity 0
+    vxlan id 1 local 10.146.0.2 dev ens4 srcport 0 0 dstport 8472 nolearning ageing 300 udpcsum addrgenmode eui64
+```
+
+![](flannel-network.png)
 
 ## 优点
 

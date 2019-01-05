@@ -1,22 +1,28 @@
-# 主要概念
+# 资源对象
 
-Kubernetes主要概念和对象介绍。
+Kubernetes 主要概念和对象介绍。
 
-- Pod, Service, Namespace和Node
-- Service
-- Volume和Persistent Volume
-- Deployment
-- Secret
-- StatefulSet
-- DaemonSet
-- ServiceAccount
-- ReplicationController和ReplicaSet
-- Job
-- CronJob
-- SecurityContext
-- Resource Quota
-- Pod Security Policy
-- Horizontal Pod Autoscaling
-- Network Policy
-- Ingress
-- ThirdPartyResources
+- [Autoscaling (HPA)](autoscaling.md)
+- [ConfigMap](configmap.md)
+- [CronJob](cronjob.md)
+- [CustomResourceDefinition](customresourcedefinition.md)
+- [DaemonSet](daemonset.md)
+- [Deployment](deployment.md)
+- [Ingress](ingress.md)
+- [Job](job.md)
+- [LocalVolume](local-volume.md)
+- [Namespace](namespace.md)
+- [NetworkPolicy](network-policy.md)
+- [Node](node.md)
+- [PersistentVolume](persistent-volume.md)
+- [Pod](pod.md)
+- [PodPreset](podpreset.md)
+- [ReplicaSet](replicaset.md)
+- [Resource Quota](quota.md)
+- [Secret](secret.md)
+- [SecurityContext](security-context.md)
+- [Service](service.md)
+- [ServiceAccount](serviceaccount.md)
+- [StatefulSet](statefulset.md)
+- [ThirdPartyResources](thirdpartyresources.md)
+- [Volume](volume.md)

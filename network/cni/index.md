@@ -9,6 +9,14 @@ CNI插件包括两部分：
   - 清理网络: DelNetwork(net *NetworkConfig, rt *RuntimeConf) error
 - IPAM Plugin负责给容器分配IP地址，主要实现包括host-local和dhcp。
 
+Kubernetes Pod 中的其他容器都是Pod所属pause容器的网络，创建过程为：
+
+1. kubelet 先创建pause容器生成network namespace
+2. 调用网络CNI driver
+3. CNI driver 根据配置调用具体的cni 插件
+4. cni 插件给pause 容器配置网络
+5. pod 中其他的容器都使用 pause 容器的网络
+
 ![](Chart_Container-Network-Interface-Drivers.png)
 
 所有CNI插件均支持通过环境变量和标准输入传入参数：
@@ -19,11 +27,23 @@ $ echo '{"cniVersion": "0.3.1","name": "mynet","type": "macvlan","bridge": "cni0
 $ echo '{"cniVersion": "0.3.1","type":"IGNORED", "name": "a","ipam": {"type": "host-local", "subnet":"10.1.2.3/24"}}' | sudo CNI_COMMAND=ADD CNI_NETNS=/var/run/netns/a CNI_PATH=./bin CNI_IFNAME=a CNI_CONTAINERID=a CNI_VERSION=0.3.1 ./bin/host-local
 ```
 
+常见的CNI网络插件有
+
+![](cni-plugins.png)
+
+**CNI Plugin Chains**
+
+CNI还支持Plugin Chains，即指定一个插件列表，由Runtime依次执行每个插件。这对支持端口映射（portmapping）、虚拟机等非常有帮助。配置方法可以参考后面的[端口映射示例](#端口映射示例)。
+
 ## Bridge
 
 Bridge是最简单的CNI网络插件，它首先在Host创建一个网桥，然后再通过veth pair连接该网桥到container netns。
 
-注意，Bridge模式下，多主机网络通信需要额外配置主机路由。可以借助[Flannel](../flannel/index.html)或者Quagga动态路由等来自动配置。
+![](cni-bridge.png)
+
+注意：**Bridge模式下，多主机网络通信需要额外配置主机路由，或使用overlay网络**。可以借助[Flannel](../flannel/index.html)或者Quagga动态路由等来自动配置。比如overlay情况下的网络结构为
+
+![](cni-overlay.png)
 
 配置示例
 
@@ -177,7 +197,7 @@ ptp插件通过veth pair给容器和host创建点对点连接：veth pair一端�
 
 ## IPVLAN
 
-IPVLAN 和 MACVLAN 类似，都是从一个主机接口虚拟出多个虚拟网络接口。一个重要的区别就是所有的虚拟接口都有相同的 mac 地址，而拥有不同的 ip 地址。因为所有的虚拟接口要共享 mac 地址，所有有些需要注意的地方：
+IPVLAN 和 MACVLAN 类似，都是从一个主机接口虚拟出多个虚拟网络接口。一个重要的区别就是所有的虚拟接口都有相同的 mac 地址，而拥有不同的 ip 地址。因为所有的虚拟接口要共享 mac 地址，所以有些需要注意的地方：
 
 - DHCP 协议分配 ip 的时候一般会用 mac 地址作为机器的标识。这个情况下，客户端动态获取 ip 的时候需要配置唯一的 ClientID 字段，并且 DHCP server 也要正确配置使用该字段作为机器标识，而不是使用 mac 地址
 
@@ -273,8 +293,6 @@ Calico在每一个计算节点利用Linux Kernel实现了一个高效的vRouter�
 
 OVN为Kubernetes提供了两种网络方案：
 
-OVN为Kubernetes提供了两种网络方案：
-
 * Overaly: 通过ovs overlay连接容器
 * Underlay: 将VM内的容器连到VM所在的相同网络（开发中）
 
@@ -305,9 +323,113 @@ OpenContrail是Juniper推出的开源网络虚拟化平台，其商业版本为C
 
 [michaelhenkel/opencontrail-cni-plugin](https://github.com/michaelhenkel/opencontrail-cni-plugin)提供了一个OpenContrail的CNI插件。
 
-## [CNI Plugin Chains](cni-chain.md)
+### Network Configuration Lists
 
-CNI还支持Plugin Chains，即指定一个插件列表，由Runtime依次执行每个插件。这对支持portmapping、vm等非常有帮助。
+[CNI SPEC](https://github.com/containernetworking/cni/blob/master/SPEC.md#network-configuration-lists) 支持指定网络配置列表，包含多个网络插件，由 Runtime 依次执行。注意
+
+- ADD 操作，按顺序依次调用每个插件；而 DEL 操作调用顺序相反
+- ADD 操作，除最后一个插件，前面每个插件需要增加 `prevResult` 传递给其后的插件
+- 第一个插件必须要包含 ipam 插件
+
+### 端口映射示例
+
+下面的例子展示了 bridge+[portmap](https://github.com/containernetworking/plugins/tree/master/plugins/meta/portmap) 插件的用法。
+
+首先，配置 CNI 网络使用 bridge+portmap 插件：
+
+```sh
+# cat /root/mynet.conflist
+{
+  "name": "mynet",
+  "cniVersion": "0.3.0",
+  "plugins": [
+    {
+      "type": "bridge",
+      "bridge": "mynet",
+      "ipMasq": true,
+      "isGateway": true,
+      "ipam": {
+      "type": "host-local",
+      "subnet": "10.244.10.0/24",
+      "routes": [
+          {"dst": "0.0.0.0/0"}
+      ]
+      }
+    },
+    {
+       "type": "portmap",
+       "capabilities": {"portMappings": true}
+    }
+  ]
+}
+```
+
+然后通过 `CAP_ARGS` 设置端口映射参数：
+
+```sh
+# export CAP_ARGS='{
+    "portMappings": [
+        {
+            "hostPort":      9090,
+            "containerPort": 80,
+            "protocol":      "tcp",
+            "hostIP":        "127.0.0.1"
+        }
+    ]
+}'
+```
+
+测试添加网络接口：
+
+```sh
+# ip netns add test
+# CNI_PATH=/opt/cni/bin NETCONFPATH=/root ./cnitool add mynet /var/run/netns/test
+{
+    "interfaces": [
+        {
+            "name": "mynet",
+            "mac": "0a:58:0a:f4:0a:01"
+        },
+        {
+            "name": "veth2cfb1d64",
+            "mac": "4a:dc:1f:b7:56:b1"
+        },
+        {
+            "name": "eth0",
+            "mac": "0a:58:0a:f4:0a:07",
+            "sandbox": "/var/run/netns/test"
+        }
+    ],
+    "ips": [
+        {
+            "version": "4",
+            "interface": 2,
+            "address": "10.244.10.7/24",
+            "gateway": "10.244.10.1"
+        }
+    ],
+    "routes": [
+        {
+            "dst": "0.0.0.0/0"
+        }
+    ],
+    "dns": {}
+}
+```
+
+可以从 iptables 规则中看到添加的规则：
+
+```sh
+# iptables-save | grep 10.244.10.7
+-A CNI-DN-be1eedf7a76853f303ebd -d 127.0.0.1/32 -p tcp -m tcp --dport 9090 -j DNAT --to-destination 10.244.10.7:80
+-A CNI-SN-be1eedf7a76853f303ebd -s 127.0.0.1/32 -d 10.244.10.7/32 -p tcp -m tcp --dport 80 -j MASQUERADE
+```
+
+最后，清理网络接口：
+
+```
+# CNI_PATH=/opt/cni/bin NETCONFPATH=/root ./cnitool del mynet /var/run/netns/test
+```
 
 ## 其他
 
@@ -330,4 +452,3 @@ CNI还支持Plugin Chains，即指定一个插件列表，由Runtime依次执行
 [CNI-Genie](https://github.com/Huawei-PaaS/CNI-Genie)是华为PaaS团队推出的同时支持多种网络插件（支持calico, canal, romana, weave等）的CNI插件。
 
 项目主页为<https://github.com/Huawei-PaaS/CNI-Genie>。
-

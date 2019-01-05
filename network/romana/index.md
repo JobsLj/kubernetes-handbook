@@ -2,6 +2,25 @@
 
 Romana是Panic Networks在2016年提出的开源项目，旨在解决Overlay方案给网络带来的开销。
 
+## Kubernetes部署
+
+对使用kubeadm部署的Kubernetes集群：
+
+```sh
+kubectl apply -f https://raw.githubusercontent.com/romana/romana/master/docs/kubernetes/romana-kubeadm.yml
+```
+
+对使用kops部署的Kubernetes集群:
+
+```sh
+kubectl apply -f https://raw.githubusercontent.com/romana/romana/master/docs/kubernetes/romana-kops.yml
+```
+
+使用kops时要注意
+
+- 设置网络插件使用CNI `--networking cni`
+- 对于aws还提供`romana-aws`和`romana-vpcrouter`自动配置Node和Zone之间的路由
+
 ## 工作原理
 
 ![](romana.png)
@@ -26,6 +45,7 @@ Romana是Panic Networks在2016年提出的开源项目，旨在解决Overlay方�
 **参考文档**
 
 - <http://romana.io/>
-- <https://github.com/romana/romana>
-- <http://romana.io/how/background/>
+- [Romana basics](http://romana.io/how/romana_basics/)
+- [Romana Github](https://github.com/romana/romana)
+- [Romana 2.0](http://romana.readthedocs.io/en/latest/index.html)
 
